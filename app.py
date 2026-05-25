@@ -117,23 +117,22 @@ def detectar_marca(titulo):
 
 
 def fetch_page(page_num):
-    """Descarga una página y devuelve la soup + artículos. None si falla."""
+    """Descarga una página y devuelve los artículos."""
     url = f"https://www.chollometro.com/search/ofertas?merchant-id={MERCHANT_ID}&page={page_num}"
     try:
         response = requests.get(url, headers=HEADERS, timeout=15)
         if response.status_code != 200:
-            return None, []
+            return []
     except:
-        return None, []
-
+        return []
     soup = BeautifulSoup(response.text, 'html.parser')
-    articles = soup.find_all('article', class_=lambda c: c and 'thread' in c)
-    return soup, articles
+    return soup.find_all('article', class_=lambda c: c and 'thread' in c)
 
 
-def get_page_first_date(page_num):
-    """Obtiene la fecha del primer chollo de una página (la más reciente)."""
-    _, articles = fetch_page(page_num)
+def get_page_dates(page_num):
+    """Devuelve (primera_fecha, última_fecha) de una página — la más reciente y la más antigua."""
+    articles = fetch_page(page_num)
+    dates = []
     for article in articles:
         vue_div = article.find('div', attrs={'data-vue3': True})
         if not vue_div:
@@ -141,65 +140,82 @@ def get_page_first_date(page_num):
         try:
             vue_data = json.loads(vue_div['data-vue3'])
             thread = vue_data.get('props', {}).get('thread', {})
-            pub_timestamp = thread.get('publishedAt', 0)
-            if pub_timestamp:
-                return datetime.utcfromtimestamp(int(pub_timestamp))
+            ts = thread.get('publishedAt', 0)
+            if ts:
+                dates.append(datetime.utcfromtimestamp(int(ts)))
         except:
             continue
-    return None
+    if not dates:
+        return None, None
+    return max(dates), min(dates)  # primera (más reciente), última (más antigua)
 
 
-def find_start_page(fecha_fin, log):
+def find_page_boundary(target_date, direction, max_page, log):
     """
-    Salto exponencial + búsqueda binaria para encontrar la página
-    donde empiezan los chollos dentro del rango de fechas.
+    Salto exponencial + búsqueda binaria.
+    direction = 'start' → busca la primera página con chollos <= target_date (FECHA_FIN)
+    direction = 'end'   → busca la última página con chollos >= target_date (FECHA_INICIO)
     """
-    log.write("🔍 **Fase 1: Buscando página de inicio (salto exponencial)...**")
+    label = "inicio" if direction == "start" else "final"
+    log.write(f"🔍 Buscando página **{label}** (fecha objetivo: {target_date.strftime('%d/%m/%Y')})...")
 
-    # --- Paso 1: Salto exponencial (1, 2, 4, 8, 16, 32...) ---
-    prev_page = 1
+    # --- Salto exponencial ---
+    prev = 1
     page = 1
-    while True:
-        first_date = get_page_first_date(page)
+    while page <= max_page:
+        first_date, last_date = get_page_dates(page)
         time.sleep(0.5)
 
         if first_date is None:
-            log.write(f"   Pág {page}: sin datos → fin del merchant")
-            return max(1, prev_page)
+            log.write(f"   Pág {page}: sin datos")
+            break
 
-        log.write(f"   Pág {page}: primer chollo del {first_date.strftime('%d/%m/%Y')}")
+        log.write(f"   Pág {page}: {first_date.strftime('%d/%m')} → {last_date.strftime('%d/%m')}")
 
-        if first_date <= fecha_fin:
-            break  # Esta página ya tiene chollos dentro del rango
+        if direction == 'start':
+            if first_date <= target_date:
+                break
+        else:  # end
+            if last_date < target_date:
+                break
 
-        prev_page = page
-        page *= 2  # Salto exponencial
+        prev = page
+        page = min(page * 2, max_page + 1)
 
-    # --- Paso 2: Búsqueda binaria entre prev_page y page ---
-    lo = prev_page
-    hi = page
-    log.write(f"🔍 **Fase 2: Búsqueda binaria entre pág {lo} y {hi}...**")
+    if page > max_page:
+        page = max_page
+
+    # --- Búsqueda binaria ---
+    lo, hi = prev, page
+    log.write(f"   🔎 Binaria entre pág {lo} y {hi}...")
 
     while lo < hi:
         mid = (lo + hi) // 2
-        first_date = get_page_first_date(mid)
+        first_date, last_date = get_page_dates(mid)
         time.sleep(0.5)
 
-        if first_date is None or first_date <= fecha_fin:
+        if first_date is None:
             hi = mid
-            log.write(f"   Pág {mid}: {first_date.strftime('%d/%m/%Y') if first_date else 'sin datos'} → buscando antes")
-        else:
-            lo = mid + 1
-            log.write(f"   Pág {mid}: {first_date.strftime('%d/%m/%Y')} → aún muy reciente")
+            continue
 
-    # Retrocedemos 1 página por seguridad (puede haber fechas mezcladas)
-    start = max(1, lo - 1)
-    log.write(f"✅ **Empezando recolección desde página {start}**")
-    return start
+        if direction == 'start':
+            if first_date <= target_date:
+                hi = mid
+            else:
+                lo = mid + 1
+        else:  # end
+            if last_date >= target_date:
+                lo = mid + 1
+            else:
+                hi = mid
+
+    result = max(1, lo - 1) if direction == 'start' else lo
+    log.write(f"   ✅ Página {label}: **{result}**")
+    return result
 
 
 def extract_deals_from_articles(articles, fecha_inicio, fecha_fin):
-    """Extrae los chollos de los artículos de una página dentro del rango."""
+    """Extrae los chollos dentro del rango de una página."""
     page_deals = []
     stop = False
     skipped = 0
@@ -231,17 +247,14 @@ def extract_deals_from_articles(articles, fecha_inicio, fecha_fin):
             except:
                 pass
 
-        # Más reciente que FECHA_FIN → saltar
         if pub_date and pub_date > fecha_fin:
             skipped += 1
             continue
 
-        # Más antiguo que FECHA_INICIO → parar
         if pub_date and pub_date < fecha_inicio:
             stop = True
             break
 
-        # Dentro del rango → recoger
         link = thread.get('shareableLink', '')
         if not link:
             slug = thread.get('titleSlug', '')
@@ -272,61 +285,74 @@ def extract_deals_from_articles(articles, fecha_inicio, fecha_fin):
     return page_deals, stop, skipped
 
 
-# --- SCRAPING (solo cuando se pulsa el botón) ---
+# --- SCRAPING ---
 if iniciar:
     deals = []
-    total_skipped = 0
 
     progress_bar = st.progress(0, text="Iniciando...")
     status_text = st.empty()
     log_container = st.expander("📋 Log de ejecución", expanded=True)
 
-    # --- FASE 1+2: Encontrar página de inicio con salto exponencial + binaria ---
-    status_text.info("🔍 Buscando la página correcta para tu rango de fechas...")
-    start_page = find_start_page(FECHA_FIN, log_container)
+    MAX_PAGE_LIMIT = 500  # Tope de seguridad absoluto
 
-    # --- FASE 3: Recolección página a página desde start_page ---
-    log_container.write(f"📥 **Fase 3: Recolectando chollos desde página {start_page}...**")
-    status_text.info(f"📥 Recolectando chollos desde página {start_page}...")
+    # --- FASE 1: Encontrar página de INICIO (donde empieza FECHA_FIN) ---
+    status_text.info("🔍 Fase 1/3: Buscando página de inicio...")
+    progress_bar.progress(5, text="Buscando página de inicio...")
+    start_page = find_page_boundary(FECHA_FIN, 'start', MAX_PAGE_LIMIT, log_container)
 
-    page = start_page
-    stop_scraping = False
+    # --- FASE 2: Encontrar página de FINAL (donde termina FECHA_INICIO) ---
+    status_text.info("🔍 Fase 2/3: Buscando página final...")
+    progress_bar.progress(15, text="Buscando página final...")
+    end_page = find_page_boundary(FECHA_INICIO, 'end', MAX_PAGE_LIMIT, log_container)
 
-    while not stop_scraping:
-        progress_bar.progress(min(95, 30 + (page - start_page) * 3), text=f"Página {page}...")
-        status_text.info(f"📄 Página {page}... ({len(deals)} chollos recogidos)")
+    # Seguridad: end siempre >= start
+    end_page = max(end_page, start_page)
+    # Añadir margen de seguridad (+2 páginas)
+    end_page = min(end_page + 2, MAX_PAGE_LIMIT)
 
-        _, articles = fetch_page(page)
+    total_pages = end_page - start_page + 1
+    log_container.write(f"\n📐 **Rango de páginas: {start_page} → {end_page} ({total_pages} páginas a escanear)**")
+
+    # --- FASE 3: Recolección solo en el rango de páginas ---
+    status_text.info(f"📥 Fase 3/3: Recolectando chollos (págs {start_page}-{end_page})...")
+    log_container.write(f"📥 **Fase 3: Recolectando chollos...**")
+
+    for i, page in enumerate(range(start_page, end_page + 1)):
+        pct = 20 + int(75 * (i / total_pages))
+        progress_bar.progress(min(pct, 95), text=f"Página {page}/{end_page} ({len(deals)} chollos)")
+        status_text.info(f"📄 Página {page}/{end_page}... ({len(deals)} chollos recogidos)")
+
+        articles = fetch_page(page)
 
         if not articles:
-            log_container.write(f"⚠️ Sin artículos en página {page}. Fin.")
-            break
+            log_container.write(f"⚠️ Pág {page}: sin artículos")
+            continue
 
-        page_deals, stop_scraping, skipped = extract_deals_from_articles(
+        page_deals, should_stop, skipped = extract_deals_from_articles(
             articles, FECHA_INICIO, FECHA_FIN
         )
         deals.extend(page_deals)
-        total_skipped += skipped
 
         log_container.write(
             f"✅ Pág {page}: {len(page_deals)} chollos"
             + (f" | ⏭️ {skipped} saltados" if skipped else "")
-            + (" | 🛑 Límite fecha alcanzado" if stop_scraping else "")
+            + (" | 🛑 Límite fecha" if should_stop else "")
         )
 
-        if stop_scraping:
+        if should_stop:
             break
 
-        page += 1
         time.sleep(1.5)
 
     progress_bar.progress(100, text="✅ Scraping completado!")
     status_text.empty()
 
-    pages_searched = page - start_page + 1
-    log_container.write(f"\n📊 **Resumen: {len(deals)} chollos en {pages_searched} páginas escaneadas**")
+    log_container.write(f"\n{'='*50}")
+    log_container.write(f"📊 **Resultado: {len(deals)} chollos encontrados**")
+    log_container.write(f"📐 Páginas escaneadas: {start_page} → {end_page} ({total_pages} págs)")
     if start_page > 1:
-        log_container.write(f"⚡ **Optimización: se saltaron {start_page - 1} páginas gracias a la búsqueda binaria**")
+        log_container.write(f"⚡ Páginas saltadas al inicio: {start_page - 1}")
+    log_container.write(f"{'='*50}")
 
     # Guardar en session_state
     if deals:
@@ -334,24 +360,23 @@ if iniciar:
         st.session_state['fecha_inicio_str'] = FECHA_INICIO.strftime('%d/%m/%Y')
         st.session_state['fecha_fin_str'] = FECHA_FIN.strftime('%d/%m/%Y')
         st.session_state['merchant_id'] = MERCHANT_ID
-        st.session_state['pages_skipped'] = start_page - 1
+        st.session_state['start_page'] = start_page
+        st.session_state['end_page'] = end_page
     else:
         st.warning("⚠️ No se encontraron chollos en ese rango de fechas.")
 
 
-# --- MOSTRAR RESULTADOS (siempre que haya datos en session_state) ---
+# --- MOSTRAR RESULTADOS ---
 if 'df' in st.session_state and not st.session_state['df'].empty:
     df = st.session_state['df']
     f_inicio = st.session_state.get('fecha_inicio_str', '')
     f_fin = st.session_state.get('fecha_fin_str', '')
     m_id = st.session_state.get('merchant_id', '')
-    pages_skipped = st.session_state.get('pages_skipped', 0)
+    s_page = st.session_state.get('start_page', 1)
+    e_page = st.session_state.get('end_page', 1)
 
     st.header(f"🎯 {len(df)} chollos encontrados")
-    st.caption(
-        f"Del {f_inicio} al {f_fin} | Merchant ID: {m_id}"
-        + (f" | ⚡ {pages_skipped} páginas saltadas con búsqueda binaria" if pages_skipped > 0 else "")
-    )
+    st.caption(f"Del {f_inicio} al {f_fin} | Merchant: {m_id} | Páginas {s_page}→{e_page}")
 
     # --- MÉTRICAS ---
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -418,36 +443,4 @@ if 'df' in st.session_state and not st.session_state['df'].empty:
         st.download_button(
             "📥 Descargar Excel",
             data=buffer.getvalue(),
-            file_name=f"chollos_{m_id}_{f_inicio.replace('/', '')}_a_{f_fin.replace('/', '')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
-
-    with col_dl2:
-        csv_data = df_filtered.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            "📥 Descargar CSV",
-            data=csv_data,
-            file_name=f"chollos_{m_id}_{f_inicio.replace('/', '')}_a_{f_fin.replace('/', '')}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
-
-elif 'df' not in st.session_state:
-    st.markdown("""
-    ### 👋 ¡Bienvenido!
-
-    **Cómo usar:**
-    1. 🏪 Elige el merchant en el sidebar izquierdo
-    2. 📅 Selecciona las fechas de inicio y fin
-    3. 🚀 Pulsa **Iniciar Scraping**
-    4. 📥 Descarga los resultados en Excel o CSV
-
-    **Merchants populares:**
-    | Merchant | ID |
-    |---|---|
-    | MediaMarkt | 171 |
-    | Amazon | 11 |
-    | PcComponentes | 389 |
-    | El Corte Inglés | 456 |
-    """)
+            file_name=f"chollos_{m_id}_{f_inicio.replace('/', '')}_
