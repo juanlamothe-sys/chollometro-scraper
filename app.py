@@ -462,56 +462,8 @@ if 'df' in st.session_state and not st.session_state['df'].empty:
         f"Páginas {s_page} → {e_page}"
     )
 
-    # --- MÉTRICAS ---
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric(
-        "🔥 Grados medio",
-        f"{df['Grados (°)'].mean():.1f}°"
-    )
-    col2.metric(
-        "🏆 Grados máximo",
-        f"{df['Grados (°)'].max()}°"
-    )
-    col3.metric(
-        "💬 Comentarios",
-        f"{df['Comentarios'].sum():,}"
-    )
-    col4.metric(
-        "✅ Activos",
-        len(df[df['Estado'] != 'Expirado'])
-    )
-    col5.metric(
-        "⏰ Expirados",
-        len(df[df['Estado'] == 'Expirado'])
-    )
-
-    # --- GRÁFICOS ---
-    st.header("📊 Análisis")
-    tab1, tab2, tab3 = st.tabs(
-        ["🏷️ Marcas", "📅 Evolución", "📂 Categorías"]
-    )
-
-    with tab1:
-        marca_counts = df['Marca'].value_counts().head(20)
-        st.bar_chart(marca_counts)
-
-    with tab2:
-        df_temp = df.copy()
-        df_temp['Fecha_dt'] = pd.to_datetime(
-            df_temp['Fecha'], errors='coerce'
-        )
-        df_temp['Semana'] = (
-            df_temp['Fecha_dt'].dt.to_period('W').astype(str)
-        )
-        evolucion = df_temp.groupby('Semana').size()
-        st.line_chart(evolucion)
-
-    with tab3:
-        cat_counts = df['Categoría'].value_counts().head(15)
-        st.bar_chart(cat_counts)
-
-    # --- TABLA CON FILTROS ---
-    st.header("📋 Todos los chollos")
+    # --- FILTROS PRIMERO ---
+    st.header("🔎 Filtros")
 
     col_f1, col_f2, col_f3 = st.columns(3)
     with col_f1:
@@ -544,6 +496,63 @@ if 'df' in st.session_state and not st.session_state['df'].empty:
             df_filtered['Estado'].isin(estado_filter)
         ]
 
+    # --- MÉTRICAS (ahora usan df_filtered) ---
+    any_filter = marca_filter or cat_filter or estado_filter
+    if any_filter:
+        st.caption(
+            f"📌 Mostrando {len(df_filtered)} de "
+            f"{len(df)} chollos"
+        )
+
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric(
+        "🔥 Grados medio",
+        f"{df_filtered['Grados (°)'].mean():.1f}°"
+    )
+    col2.metric(
+        "🏆 Grados máximo",
+        f"{df_filtered['Grados (°)'].max()}°"
+    )
+    col3.metric(
+        "💬 Comentarios",
+        f"{df_filtered['Comentarios'].sum():,}"
+    )
+    col4.metric(
+        "✅ Activos",
+        len(df_filtered[df_filtered['Estado'] != 'Expirado'])
+    )
+    col5.metric(
+        "⏰ Expirados",
+        len(df_filtered[df_filtered['Estado'] == 'Expirado'])
+    )
+
+    # --- GRÁFICOS (también usan df_filtered) ---
+    st.header("📊 Análisis")
+    tab1, tab2, tab3 = st.tabs(
+        ["🏷️ Marcas", "📅 Evolución", "📂 Categorías"]
+    )
+
+    with tab1:
+        marca_counts = df_filtered['Marca'].value_counts().head(20)
+        st.bar_chart(marca_counts)
+
+    with tab2:
+        df_temp = df_filtered.copy()
+        df_temp['Fecha_dt'] = pd.to_datetime(
+            df_temp['Fecha'], errors='coerce'
+        )
+        df_temp['Semana'] = (
+            df_temp['Fecha_dt'].dt.to_period('W').astype(str)
+        )
+        evolucion = df_temp.groupby('Semana').size()
+        st.line_chart(evolucion)
+
+    with tab3:
+        cat_counts = df_filtered['Categoría'].value_counts().head(15)
+        st.bar_chart(cat_counts)
+
+    # --- TABLA ---
+    st.header("📋 Todos los chollos")
     st.dataframe(
         df_filtered,
         use_container_width=True,
@@ -560,7 +569,11 @@ if 'df' in st.session_state and not st.session_state['df'].empty:
 
     safe_inicio = f_inicio.replace('/', '')
     safe_fin = f_fin.replace('/', '')
-    base_filename = "chollos_" + str(m_id) + "_" + safe_inicio + "_a_" + safe_fin
+    base_filename = (
+        "chollos_" + str(m_id)
+        + "_" + safe_inicio
+        + "_a_" + safe_fin
+    )
 
     col_dl1, col_dl2 = st.columns(2)
 
@@ -581,7 +594,9 @@ if 'df' in st.session_state and not st.session_state['df'].empty:
         )
 
     with col_dl2:
-        csv_data = df_filtered.to_csv(index=False).encode('utf-8')
+        csv_data = df_filtered.to_csv(
+            index=False
+        ).encode('utf-8')
         st.download_button(
             "📥 Descargar CSV",
             data=csv_data,
@@ -596,19 +611,17 @@ elif 'df' not in st.session_state:
         ### 👋 ¡Bienvenido!
 
         **Cómo usar:**
-        1. 🏪 Elige el retailer en el selector a la izquierda
+        1. 🏪 Elige el merchant en el sidebar izquierdo
         2. 📅 Selecciona las fechas de inicio y fin
-        3. 🚀 Pulsa **Iniciar Búsqueda**
+        3. 🚀 Pulsa **Iniciar Scraping**
         4. 📥 Descarga los resultados en Excel o CSV
 
-        **Retailer populares:**
-        | Retailer | ID |
+        **Merchants populares:**
+        | Merchant | ID |
         |---|---|
         | MediaMarkt | 171 |
         | Amazon | 11 |
         | PcComponentes | 389 |
         | El Corte Inglés | 456 |
-        | LG | 1857 |
-        | Samsung | 256 |
         """
     )
