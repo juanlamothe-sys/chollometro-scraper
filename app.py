@@ -25,6 +25,7 @@ MERCHANTS = {
     "PcComponentes (389)": 389,
     "El Corte Inglés (456)": 456,
     "LG (1857)": 1857,
+    "Samsung (256)": 256,
     "Otro (manual)": 0,
 }
 
@@ -608,5 +609,6 @@ elif 'df' not in st.session_state:
         | PcComponentes | 389 |
         | El Corte Inglés | 456 |
         | LG | 1857 |
+        | Samsung | 256 |
         """
     )
