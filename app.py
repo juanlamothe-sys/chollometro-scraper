@@ -116,7 +116,7 @@ def detectar_marca(titulo):
     return mejor_marca
 
 
-# --- SCRAPING ---
+# --- SCRAPING (solo cuando se pulsa el botón) ---
 if iniciar:
     deals = []
     stop_scraping = False
@@ -182,7 +182,10 @@ if iniciar:
                 continue
 
             if pub_date and pub_date < FECHA_INICIO:
-                log_container.write(f"🛑 Chollo del {pub_date.strftime('%d/%m/%Y')} → anterior a {FECHA_INICIO.strftime('%d/%m/%Y')}. Parando.")
+                log_container.write(
+                    f"🛑 Chollo del {pub_date.strftime('%d/%m/%Y')} → "
+                    f"anterior a {FECHA_INICIO.strftime('%d/%m/%Y')}. Parando."
+                )
                 stop_scraping = True
                 break
 
@@ -220,94 +223,107 @@ if iniciar:
     progress_bar.progress(100, text="✅ Scraping completado!")
     status_text.empty()
 
-    # --- RESULTADOS ---
+    # Guardar en session_state para que sobreviva a los re-renders
     if deals:
-        df = pd.DataFrame(deals)
-
-        st.header(f"🎯 {len(df)} chollos encontrados")
-        st.caption(f"Del {FECHA_INICIO.strftime('%d/%m/%Y')} al {FECHA_FIN.strftime('%d/%m/%Y')} | Merchant ID: {MERCHANT_ID}")
-
-        col1, col2, col3, col4, col5 = st.columns(5)
-        col1.metric("🔥 Grados medio", f"{df['Grados (°)'].mean():.1f}°")
-        col2.metric("🏆 Grados máximo", f"{df['Grados (°)'].max()}°")
-        col3.metric("💬 Comentarios", f"{df['Comentarios'].sum():,}")
-        col4.metric("✅ Activos", len(df[df['Estado'] != 'Expirado']))
-        col5.metric("⏰ Expirados", len(df[df['Estado'] == 'Expirado']))
-
-        # --- GRÁFICOS ---
-        st.header("📊 Análisis")
-        tab1, tab2, tab3 = st.tabs(["🏷️ Marcas", "📅 Evolución", "📂 Categorías"])
-
-        with tab1:
-            marca_counts = df['Marca'].value_counts().head(20)
-            st.bar_chart(marca_counts)
-
-        with tab2:
-            df_temp = df.copy()
-            df_temp['Fecha_dt'] = pd.to_datetime(df_temp['Fecha'], errors='coerce')
-            df_temp['Semana'] = df_temp['Fecha_dt'].dt.to_period('W').astype(str)
-            evolucion = df_temp.groupby('Semana').size()
-            st.line_chart(evolucion)
-
-        with tab3:
-            cat_counts = df['Categoría'].value_counts().head(15)
-            st.bar_chart(cat_counts)
-
-        # --- TABLA CON FILTROS ---
-        st.header("📋 Todos los chollos")
-
-        col_f1, col_f2, col_f3 = st.columns(3)
-        with col_f1:
-            marca_filter = st.multiselect("Filtrar por marca", sorted(df['Marca'].unique()))
-        with col_f2:
-            cat_filter = st.multiselect("Filtrar por categoría", sorted(df['Categoría'].unique()))
-        with col_f3:
-            estado_filter = st.multiselect("Filtrar por estado", sorted(df['Estado'].unique()))
-
-        df_filtered = df.copy()
-        if marca_filter:
-            df_filtered = df_filtered[df_filtered['Marca'].isin(marca_filter)]
-        if cat_filter:
-            df_filtered = df_filtered[df_filtered['Categoría'].isin(cat_filter)]
-        if estado_filter:
-            df_filtered = df_filtered[df_filtered['Estado'].isin(estado_filter)]
-
-        st.dataframe(
-            df_filtered,
-            use_container_width=True,
-            column_config={
-                "URL": st.column_config.LinkColumn("URL"),
-                "Grados (°)": st.column_config.NumberColumn(format="%.1f°"),
-            }
-        )
-
-        # --- DESCARGA ---
-        st.header("💾 Descargar")
-        col_dl1, col_dl2 = st.columns(2)
-
-        with col_dl1:
-            buffer = io.BytesIO()
-            df_filtered.to_excel(buffer, index=False, sheet_name='Chollos')
-            st.download_button(
-                "📥 Descargar Excel",
-                data=buffer.getvalue(),
-                file_name=f"chollos_{MERCHANT_ID}_{fecha_inicio.strftime('%Y%m%d')}_a_{fecha_fin.strftime('%Y%m%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
-
-        with col_dl2:
-            csv_data = df_filtered.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                "📥 Descargar CSV",
-                data=csv_data,
-                file_name=f"chollos_{MERCHANT_ID}_{fecha_inicio.strftime('%Y%m%d')}_a_{fecha_fin.strftime('%Y%m%d')}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
+        st.session_state['df'] = pd.DataFrame(deals)
+        st.session_state['fecha_inicio_str'] = FECHA_INICIO.strftime('%d/%m/%Y')
+        st.session_state['fecha_fin_str'] = FECHA_FIN.strftime('%d/%m/%Y')
+        st.session_state['merchant_id'] = MERCHANT_ID
     else:
         st.warning("⚠️ No se encontraron chollos en ese rango de fechas.")
-else:
+
+
+# --- MOSTRAR RESULTADOS (siempre que haya datos en session_state) ---
+if 'df' in st.session_state and not st.session_state['df'].empty:
+    df = st.session_state['df']
+    f_inicio = st.session_state.get('fecha_inicio_str', '')
+    f_fin = st.session_state.get('fecha_fin_str', '')
+    m_id = st.session_state.get('merchant_id', '')
+
+    st.header(f"🎯 {len(df)} chollos encontrados")
+    st.caption(f"Del {f_inicio} al {f_fin} | Merchant ID: {m_id}")
+
+    # --- MÉTRICAS ---
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("🔥 Grados medio", f"{df['Grados (°)'].mean():.1f}°")
+    col2.metric("🏆 Grados máximo", f"{df['Grados (°)'].max()}°")
+    col3.metric("💬 Comentarios", f"{df['Comentarios'].sum():,}")
+    col4.metric("✅ Activos", len(df[df['Estado'] != 'Expirado']))
+    col5.metric("⏰ Expirados", len(df[df['Estado'] == 'Expirado']))
+
+    # --- GRÁFICOS ---
+    st.header("📊 Análisis")
+    tab1, tab2, tab3 = st.tabs(["🏷️ Marcas", "📅 Evolución", "📂 Categorías"])
+
+    with tab1:
+        marca_counts = df['Marca'].value_counts().head(20)
+        st.bar_chart(marca_counts)
+
+    with tab2:
+        df_temp = df.copy()
+        df_temp['Fecha_dt'] = pd.to_datetime(df_temp['Fecha'], errors='coerce')
+        df_temp['Semana'] = df_temp['Fecha_dt'].dt.to_period('W').astype(str)
+        evolucion = df_temp.groupby('Semana').size()
+        st.line_chart(evolucion)
+
+    with tab3:
+        cat_counts = df['Categoría'].value_counts().head(15)
+        st.bar_chart(cat_counts)
+
+    # --- TABLA CON FILTROS ---
+    st.header("📋 Todos los chollos")
+
+    col_f1, col_f2, col_f3 = st.columns(3)
+    with col_f1:
+        marca_filter = st.multiselect("Filtrar por marca", sorted(df['Marca'].unique()))
+    with col_f2:
+        cat_filter = st.multiselect("Filtrar por categoría", sorted(df['Categoría'].unique()))
+    with col_f3:
+        estado_filter = st.multiselect("Filtrar por estado", sorted(df['Estado'].unique()))
+
+    df_filtered = df.copy()
+    if marca_filter:
+        df_filtered = df_filtered[df_filtered['Marca'].isin(marca_filter)]
+    if cat_filter:
+        df_filtered = df_filtered[df_filtered['Categoría'].isin(cat_filter)]
+    if estado_filter:
+        df_filtered = df_filtered[df_filtered['Estado'].isin(estado_filter)]
+
+    st.dataframe(
+        df_filtered,
+        use_container_width=True,
+        column_config={
+            "URL": st.column_config.LinkColumn("URL"),
+            "Grados (°)": st.column_config.NumberColumn(format="%.1f°"),
+        }
+    )
+
+    # --- DESCARGA ---
+    st.header("💾 Descargar")
+    col_dl1, col_dl2 = st.columns(2)
+
+    with col_dl1:
+        buffer = io.BytesIO()
+        df_filtered.to_excel(buffer, index=False, sheet_name='Chollos')
+        st.download_button(
+            "📥 Descargar Excel",
+            data=buffer.getvalue(),
+            file_name=f"chollos_{m_id}_{f_inicio.replace('/', '')}_a_{f_fin.replace('/', '')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+
+    with col_dl2:
+        csv_data = df_filtered.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            "📥 Descargar CSV",
+            data=csv_data,
+            file_name=f"chollos_{m_id}_{f_inicio.replace('/', '')}_a_{f_fin.replace('/', '')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
+elif 'df' not in st.session_state:
     st.markdown("""
     ### 👋 ¡Bienvenido!
 
