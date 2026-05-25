@@ -10,7 +10,7 @@ import io
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(
-    page_title="🔥 Chollometro Scraper",
+    page_title="🔥 Chollometro Dashboard",
     page_icon="🔥",
     layout="wide"
 )
