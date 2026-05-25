@@ -8,36 +8,87 @@ import time
 import re
 import io
 
-# --- CONFIGURACIÓN DE PÁGINA ---
+# --- CONFIGURACION DE PAGINA ---
 st.set_page_config(
-    page_title="🔥 Chollometro Dashboard",
+    page_title="🔥 Chollometro Scraper",
     page_icon="🔥",
     layout="wide"
 )
 
-st.title("🔥 Chollometro Dashboard")
-st.markdown("Extrae y analiza chollos de cualquier vendedor en Chollometro")
+st.title("🔥 Chollometro Scraper")
+st.markdown(
+    "Extrae y analiza chollos de cualquier merchant "
+    "o busqueda en Chollometro"
+)
 
 # --- MERCHANTS PREDEFINIDOS ---
 MERCHANTS = {
+    "Todos (sin filtro)": 0,
     "MediaMarkt (171)": 171,
     "Amazon (11)": 11,
     "PcComponentes (389)": 389,
-    "El Corte Inglés (456)": 456,
-    "LG (1857)": 1857,
-    "Samsung (256)": 256,
-    "Otro (manual)": 0,
+    "El Corte Ingles (456)": 456,
+    "Carrefour (2)": 2,
+    "Lidl (4457)": 4457,
+    "Alcampo (7457)": 7457,
+    "Decathlon (7723)": 7723,
+    "Leroy Merlin (7775)": 7775,
+    "Ikea (7897)": 7897,
+    "Fnac (12540)": 12540,
+    "Worten (13267)": 13267,
+    "AliExpress (10671)": 10671,
+    "Miravia (52498)": 52498,
+    "Temu (57498)": 57498,
+    "LG (23498)": 23498,
+    "Samsung (23694)": 23694,
+    "Apple (23252)": 23252,
+    "Xiaomi (23658)": 23658,
+    "Otro (manual)": -1,
 }
 
 # --- SIDEBAR ---
 with st.sidebar:
-    st.header("⚙️ Configura tu report")
+    st.header("⚙️ Configuracion")
 
-    merchant_sel = st.selectbox("🏪 Retailer", options=list(MERCHANTS.keys()))
-    if MERCHANTS[merchant_sel] == 0:
-        MERCHANT_ID = st.number_input("ID manual", min_value=1, value=171)
+    modo = st.radio(
+        "🔎 Modo de busqueda",
+        ["Por Merchant", "Por Keyword / Marca"],
+        horizontal=True
+    )
+
+    if modo == "Por Merchant":
+        merchant_sel = st.selectbox(
+            "🏪 Merchant",
+            options=[
+                k for k in MERCHANTS.keys()
+                if k != "Todos (sin filtro)"
+            ]
+        )
+        if MERCHANTS[merchant_sel] == -1:
+            MERCHANT_ID = st.number_input(
+                "ID manual", min_value=1, value=171
+            )
+        else:
+            MERCHANT_ID = MERCHANTS[merchant_sel]
+        SEARCH_QUERY = None
+
     else:
-        MERCHANT_ID = MERCHANTS[merchant_sel]
+        SEARCH_QUERY = st.text_input(
+            "🔍 Keyword o marca",
+            placeholder="Ej: LG, Samsung, iPhone, PS5..."
+        )
+        merchant_sel = st.selectbox(
+            "🏪 Filtrar por retailer (opcional)",
+            options=list(MERCHANTS.keys())
+        )
+        if MERCHANTS[merchant_sel] == -1:
+            MERCHANT_ID = st.number_input(
+                "ID manual", min_value=1, value=171
+            )
+        elif MERCHANTS[merchant_sel] == 0:
+            MERCHANT_ID = None
+        else:
+            MERCHANT_ID = MERCHANTS[merchant_sel]
 
     st.subheader("📅 Rango de fechas")
     col1, col2 = st.columns(2)
@@ -55,55 +106,71 @@ with st.sidebar:
         )
 
     if fecha_fin < fecha_inicio:
-        st.error("❌ La fecha FIN no puede ser anterior a INICIO")
+        st.error(
+            "❌ La fecha FIN no puede ser anterior a INICIO"
+        )
         st.stop()
 
-    FECHA_INICIO = datetime.combine(fecha_inicio, datetime.min.time())
-    FECHA_FIN = datetime.combine(fecha_fin, datetime.max.time())
+    FECHA_INICIO = datetime.combine(
+        fecha_inicio, datetime.min.time()
+    )
+    FECHA_FIN = datetime.combine(
+        fecha_fin, datetime.max.time()
+    )
+
+    can_start = False
+    if modo == "Por Merchant":
+        can_start = True
+    elif modo == "Por Keyword / Marca" and SEARCH_QUERY:
+        can_start = True
 
     iniciar = st.button(
-        "🚀 Iniciar Búsqueda",
+        "🚀 Iniciar Scraping",
         type="primary",
-        use_container_width=True
+        use_container_width=True,
+        disabled=not can_start
     )
 
 # --- LISTA DE MARCAS ---
 MARCAS = [
-    'LG', 'Samsung', 'Sony', 'Xiaomi', 'Cecotec', 'Philips', 'Bosch',
-    'Siemens', 'Bose', 'JBL', 'Apple', 'HP', 'Lenovo', 'Asus', 'ASUS',
-    'Acer', 'Dell', 'MSI', 'Huawei', 'OnePlus', 'OPPO', 'Realme',
-    'Google', 'Microsoft', 'Nintendo', 'PlayStation', 'Xbox', 'Dyson',
-    'Rowenta', 'Tefal', 'Moulinex', 'Braun', "Oral-B", 'iRobot',
-    'Roomba', 'Conga', 'Dreame', 'Roborock', 'Garmin', 'Fitbit',
-    'GoPro', 'Canon', 'Nikon', 'Panasonic', 'Hisense', 'TCL', 'Haier',
-    'Whirlpool', 'Electrolux', 'AEG', 'Miele', 'Toshiba', 'Sharp',
-    'Marshall', 'Sennheiser', 'HyperX', 'Logitech', 'Razer',
-    'SteelSeries', 'Corsair', 'TP-Link', 'Netgear', 'Amazon', 'Echo',
-    'Kindle', 'Ring', 'Sonos', 'Bang & Olufsen', 'B&O', 'DeWalt',
-    'Makita', 'Karcher', 'Kärcher', 'Weber', 'WMF', 'Zwilling',
+    'LG', 'Samsung', 'Sony', 'Xiaomi', 'Cecotec', 'Philips',
+    'Bosch', 'Siemens', 'Bose', 'JBL', 'Apple', 'HP', 'Lenovo',
+    'Asus', 'ASUS', 'Acer', 'Dell', 'MSI', 'Huawei', 'OnePlus',
+    'OPPO', 'Realme', 'Google', 'Microsoft', 'Nintendo',
+    'PlayStation', 'Xbox', 'Dyson', 'Rowenta', 'Tefal',
+    'Moulinex', 'Braun', "Oral-B", 'iRobot', 'Roomba', 'Conga',
+    'Dreame', 'Roborock', 'Garmin', 'Fitbit', 'GoPro', 'Canon',
+    'Nikon', 'Panasonic', 'Hisense', 'TCL', 'Haier', 'Whirlpool',
+    'Electrolux', 'AEG', 'Miele', 'Toshiba', 'Sharp', 'Marshall',
+    'Sennheiser', 'HyperX', 'Logitech', 'Razer', 'SteelSeries',
+    'Corsair', 'TP-Link', 'Netgear', 'Amazon', 'Echo', 'Kindle',
+    'Ring', 'Sonos', 'Bang & Olufsen', 'B&O', 'DeWalt', 'Makita',
+    'Karcher', 'Kärcher', 'Weber', 'WMF', 'Zwilling',
     'KitchenAid', 'Nespresso', "De'Longhi", 'DeLonghi', 'Krups',
     'Tassimo', 'SanDisk', 'Western Digital', 'WD', 'Seagate',
     'Kingston', 'Crucial', 'Intel', 'AMD', 'Nvidia', 'NanoCell',
     'Beats', 'Nothing', 'Motorola', 'Honor', 'Amazfit', 'Polar',
-    'Suunto', 'Lego', 'Playmobil', 'Barbie', 'Hot Wheels', 'Cricut',
-    'Brother', 'Epson', 'Roidmi', 'Tineco', 'Creality', 'AnkerMake',
-    'Anker', 'Soundcore', 'Eufy', 'Jackery', 'Singer', 'EcoFlow',
-    'Bluetti', 'Worx', 'Gardena', 'Husqvarna', 'Remington', 'Babyliss',
-    'GHD', 'Revlon', 'Shark', 'Ninja', 'Russell Hobbs', 'Fujitsu',
-    'Polti', 'Taurus', 'Jata', 'Daitsu', 'Ufesa', 'Funko', 'Sherwood',
-    'Gigabyte', 'Teka', 'Paladone', 'Balay', 'AOC', 'KOENIC', 'Midea',
-    'Pokémon', 'PS5', 'PS4', 'Smeg', 'Instant Pot', 'Cosori',
-    'Vitamix', 'hp', 'Beko', 'Candy', 'Infiniton', 'Magefesa',
-    'Ariete', 'Kenwood', 'Princess', 'Jocel', 'Cata', 'Bissell',
-    'MELLERWARE', 'Laurastar', 'LUMAN', 'Sage', 'Breville',
-    'Nutribullet', 'DJI', 'Insta360', 'Polaroid', 'Fujifilm', 'Nokia',
-    'Harman Kardon', 'Ultimate Ears', 'Vieta', 'Shokz', 'PEAQ',
-    'Newskill', 'Krom', 'Nilox', 'Evercade', 'MyArcade', 'My Arcade',
-    'Pocophone', 'POCO', 'Belkin', 'Baseus', 'Ugreen', 'CellularLine',
-    'StarTech', 'Meta', 'Ray-Ban', 'Oakley', 'Renpho', 'Geske',
-    'Segway', 'smartGyro', 'Tado', 'ZIPRO', 'Wahl', 'Duracell',
-    'Targus', 'Case Logic', 'Hama', 'ISY', 'BRITA', 'BELSON',
-    'Pyramid', 'InnoGIO',
+    'Suunto', 'Lego', 'Playmobil', 'Barbie', 'Hot Wheels',
+    'Cricut', 'Brother', 'Epson', 'Roidmi', 'Tineco', 'Creality',
+    'AnkerMake', 'Anker', 'Soundcore', 'Eufy', 'Jackery',
+    'Singer', 'EcoFlow', 'Bluetti', 'Worx', 'Gardena',
+    'Husqvarna', 'Remington', 'Babyliss', 'GHD', 'Revlon',
+    'Shark', 'Ninja', 'Russell Hobbs', 'Fujitsu', 'Polti',
+    'Taurus', 'Jata', 'Daitsu', 'Ufesa', 'Funko', 'Sherwood',
+    'Gigabyte', 'Teka', 'Paladone', 'Balay', 'AOC', 'KOENIC',
+    'Midea', 'Pokémon', 'PS5', 'PS4', 'Smeg', 'Instant Pot',
+    'Cosori', 'Vitamix', 'hp', 'Beko', 'Candy', 'Infiniton',
+    'Magefesa', 'Ariete', 'Kenwood', 'Princess', 'Jocel', 'Cata',
+    'Bissell', 'MELLERWARE', 'Laurastar', 'LUMAN', 'Sage',
+    'Breville', 'Nutribullet', 'DJI', 'Insta360', 'Polaroid',
+    'Fujifilm', 'Nokia', 'Harman Kardon', 'Ultimate Ears',
+    'Vieta', 'Shokz', 'PEAQ', 'Newskill', 'Krom', 'Nilox',
+    'Evercade', 'MyArcade', 'My Arcade', 'Pocophone', 'POCO',
+    'Belkin', 'Baseus', 'Ugreen', 'CellularLine', 'StarTech',
+    'Meta', 'Ray-Ban', 'Oakley', 'Renpho', 'Geske', 'Segway',
+    'smartGyro', 'Tado', 'ZIPRO', 'Wahl', 'Duracell', 'Targus',
+    'Case Logic', 'Hama', 'ISY', 'BRITA', 'BELSON', 'Pyramid',
+    'InnoGIO',
 ]
 
 MARCAS_CANONICAL = {
@@ -132,18 +199,39 @@ def detectar_marca(titulo):
         match = re.search(pattern, titulo, re.IGNORECASE)
         if match and match.start() < mejor_pos:
             mejor_pos = match.start()
-            mejor_marca = MARCAS_CANONICAL.get(marca.lower(), marca)
+            mejor_marca = MARCAS_CANONICAL.get(
+                marca.lower(), marca
+            )
     return mejor_marca
 
 
+def build_url(page_num):
+    """Construye la URL segun el modo de busqueda."""
+    if SEARCH_QUERY:
+        query_encoded = SEARCH_QUERY.replace(" ", "+")
+        url = (
+            "https://www.chollometro.com/search"
+            "?q=" + query_encoded
+        )
+        if MERCHANT_ID:
+            url = url + "&merchant-id=" + str(MERCHANT_ID)
+        url = url + "&page=" + str(page_num)
+        return url
+    else:
+        return (
+            "https://www.chollometro.com/search/ofertas"
+            "?merchant-id=" + str(MERCHANT_ID)
+            + "&page=" + str(page_num)
+        )
+
+
 def fetch_page(page_num):
-    """Descarga una página y devuelve los artículos."""
-    url = (
-        "https://www.chollometro.com/search/ofertas"
-        f"?merchant-id={MERCHANT_ID}&page={page_num}"
-    )
+    """Descarga una pagina y devuelve los articulos."""
+    url = build_url(page_num)
     try:
-        response = requests.get(url, headers=HEADERS, timeout=15)
+        response = requests.get(
+            url, headers=HEADERS, timeout=15
+        )
         if response.status_code != 200:
             return []
     except Exception:
@@ -155,19 +243,25 @@ def fetch_page(page_num):
 
 
 def get_page_dates(page_num):
-    """Devuelve (primera_fecha, última_fecha) de una página."""
+    """Devuelve (primera_fecha, ultima_fecha) de una pagina."""
     articles = fetch_page(page_num)
     dates = []
     for article in articles:
-        vue_div = article.find('div', attrs={'data-vue3': True})
+        vue_div = article.find(
+            'div', attrs={'data-vue3': True}
+        )
         if not vue_div:
             continue
         try:
             vue_data = json.loads(vue_div['data-vue3'])
-            thread = vue_data.get('props', {}).get('thread', {})
+            thread = vue_data.get('props', {}).get(
+                'thread', {}
+            )
             ts = thread.get('publishedAt', 0)
             if ts:
-                dates.append(datetime.utcfromtimestamp(int(ts)))
+                dates.append(
+                    datetime.utcfromtimestamp(int(ts))
+                )
         except Exception:
             continue
     if not dates:
@@ -176,19 +270,14 @@ def get_page_dates(page_num):
 
 
 def find_page_boundary(target_date, direction, max_page, log):
-    """
-    Salto exponencial + búsqueda binaria.
-    direction = 'start' → primera página con chollos <= target_date
-    direction = 'end'   → última página con chollos >= target_date
-    """
+    """Salto exponencial + busqueda binaria."""
     label = "inicio" if direction == "start" else "final"
     target_str = target_date.strftime('%d/%m/%Y')
     log.write(
-        f"🔍 Buscando página **{label}** "
-        f"(fecha objetivo: {target_str})..."
+        "🔍 Buscando pagina **" + label
+        + "** (fecha objetivo: " + target_str + ")..."
     )
 
-    # --- Salto exponencial ---
     prev = 1
     page = 1
     while page <= max_page:
@@ -196,12 +285,15 @@ def find_page_boundary(target_date, direction, max_page, log):
         time.sleep(0.5)
 
         if first_date is None:
-            log.write(f"   Pág {page}: sin datos")
+            log.write("   Pag " + str(page) + ": sin datos")
             break
 
         first_str = first_date.strftime('%d/%m')
         last_str = last_date.strftime('%d/%m')
-        log.write(f"   Pág {page}: {first_str} → {last_str}")
+        log.write(
+            "   Pag " + str(page) + ": "
+            + first_str + " -> " + last_str
+        )
 
         if direction == 'start':
             if first_date <= target_date:
@@ -216,10 +308,12 @@ def find_page_boundary(target_date, direction, max_page, log):
     if page > max_page:
         page = max_page
 
-    # --- Búsqueda binaria ---
     lo = prev
     hi = page
-    log.write(f"   🔎 Binaria entre pág {lo} y {hi}...")
+    log.write(
+        "   🔎 Binaria entre pag "
+        + str(lo) + " y " + str(hi) + "..."
+    )
 
     while lo < hi:
         mid = (lo + hi) // 2
@@ -246,27 +340,33 @@ def find_page_boundary(target_date, direction, max_page, log):
     else:
         result = lo
 
-    log.write(f"   ✅ Página {label}: **{result}**")
+    log.write(
+        "   ✅ Pagina " + label + ": **" + str(result) + "**"
+    )
     return result
 
 
 def extract_deals_from_articles(articles, fecha_inicio, fecha_fin):
-    """Extrae los chollos dentro del rango de una página."""
+    """Extrae los chollos dentro del rango de una pagina."""
     page_deals = []
     stop = False
     skipped = 0
 
     for article in articles:
-        vue_div = article.find('div', attrs={'data-vue3': True})
+        vue_div = article.find(
+            'div', attrs={'data-vue3': True}
+        )
         if not vue_div:
             continue
         try:
             vue_data = json.loads(vue_div['data-vue3'])
-            thread = vue_data.get('props', {}).get('thread', {})
+            thread = vue_data.get('props', {}).get(
+                'thread', {}
+            )
         except (json.JSONDecodeError, KeyError):
             continue
 
-        title = thread.get('title', 'Sin título')
+        title = thread.get('title', 'Sin titulo')
         brand = detectar_marca(title)
         degrees = thread.get('temperature', 0)
         try:
@@ -279,7 +379,9 @@ def extract_deals_from_articles(articles, fecha_inicio, fecha_fin):
         pub_date = None
         if pub_timestamp:
             try:
-                pub_date = datetime.utcfromtimestamp(int(pub_timestamp))
+                pub_date = datetime.utcfromtimestamp(
+                    int(pub_timestamp)
+                )
             except Exception:
                 pass
 
@@ -298,7 +400,7 @@ def extract_deals_from_articles(articles, fecha_inicio, fecha_fin):
             if slug:
                 link = (
                     "https://www.chollometro.com/ofertas/"
-                    f"{slug}-{thread_id}"
+                    + slug + "-" + str(thread_id)
                 )
 
         author = thread.get('user', {}).get('username', '')
@@ -308,6 +410,8 @@ def extract_deals_from_articles(articles, fecha_inicio, fecha_fin):
         next_best_price = thread.get('nextBestPrice', '')
         category_data = thread.get('mainGroup', {})
         category = category_data.get('threadGroupName', '')
+        merchant_data = thread.get('merchant', {})
+        merchant_name = merchant_data.get('merchantName', '')
 
         if pub_date:
             fecha_str = pub_date.strftime('%Y-%m-%d %H:%M')
@@ -320,15 +424,16 @@ def extract_deals_from_articles(articles, fecha_inicio, fecha_fin):
             estado = status
 
         page_deals.append({
-            'Título': title,
+            'Titulo': title,
             'Marca': brand,
+            'Retailer': merchant_name,
             'Fecha': fecha_str,
             'Autor': author,
-            'Grados (°)': degrees,
+            'Grados': degrees,
             'Comentarios': comments,
-            'Precio (€)': price,
-            'Precio ref. (€)': next_best_price,
-            'Categoría': category,
+            'Precio': price,
+            'Precio ref.': next_best_price,
+            'Categoria': category,
             'Estado': estado,
             'URL': link,
         })
@@ -342,20 +447,37 @@ if iniciar:
 
     progress_bar = st.progress(0, text="Iniciando...")
     status_text = st.empty()
-    log_container = st.expander("📋 Log de ejecución", expanded=True)
+    log_container = st.expander(
+        "📋 Log de ejecucion", expanded=True
+    )
+
+    # Mostrar que estamos buscando
+    if SEARCH_QUERY:
+        search_desc = "Keyword: " + SEARCH_QUERY
+        if MERCHANT_ID:
+            search_desc = (
+                search_desc + " | Retailer ID: "
+                + str(MERCHANT_ID)
+            )
+    else:
+        search_desc = "Merchant ID: " + str(MERCHANT_ID)
+
+    log_container.write("🔎 **" + search_desc + "**")
 
     MAX_PAGE_LIMIT = 500
 
-    # --- FASE 1: Encontrar página de INICIO ---
-    status_text.info("🔍 Fase 1/3: Buscando página de inicio...")
-    progress_bar.progress(5, text="Buscando página de inicio...")
+    status_text.info(
+        "🔍 Fase 1/3: Buscando pagina de inicio..."
+    )
+    progress_bar.progress(5, text="Buscando pagina de inicio...")
     start_page = find_page_boundary(
         FECHA_FIN, 'start', MAX_PAGE_LIMIT, log_container
     )
 
-    # --- FASE 2: Encontrar página de FINAL ---
-    status_text.info("🔍 Fase 2/3: Buscando página final...")
-    progress_bar.progress(15, text="Buscando página final...")
+    status_text.info(
+        "🔍 Fase 2/3: Buscando pagina final..."
+    )
+    progress_bar.progress(15, text="Buscando pagina final...")
     end_page = find_page_boundary(
         FECHA_INICIO, 'end', MAX_PAGE_LIMIT, log_container
     )
@@ -365,45 +487,54 @@ if iniciar:
 
     total_pages = end_page - start_page + 1
     log_container.write(
-        f"\n📐 **Rango de páginas: {start_page} → {end_page} "
-        f"({total_pages} páginas a escanear)**"
+        "\n📐 **Rango: pag " + str(start_page)
+        + " -> " + str(end_page)
+        + " (" + str(total_pages) + " paginas)**"
     )
 
-    # --- FASE 3: Recolección ---
     status_text.info(
-        f"📥 Fase 3/3: Recolectando chollos "
-        f"(págs {start_page}-{end_page})..."
+        "📥 Fase 3/3: Recolectando chollos..."
     )
-    log_container.write("📥 **Fase 3: Recolectando chollos...**")
+    log_container.write("📥 **Fase 3: Recolectando...**")
 
     for i, page in enumerate(range(start_page, end_page + 1)):
         pct = 20 + int(75 * (i / total_pages))
         pct = min(pct, 95)
         progress_bar.progress(
             pct,
-            text=f"Página {page}/{end_page} ({len(deals)} chollos)"
+            text=(
+                "Pagina " + str(page) + "/" + str(end_page)
+                + " (" + str(len(deals)) + " chollos)"
+            )
         )
         status_text.info(
-            f"📄 Página {page}/{end_page}... "
-            f"({len(deals)} chollos recogidos)"
+            "📄 Pagina " + str(page) + "/" + str(end_page)
+            + "... (" + str(len(deals)) + " chollos)"
         )
 
         articles = fetch_page(page)
 
         if not articles:
-            log_container.write(f"⚠️ Pág {page}: sin artículos")
+            log_container.write(
+                "⚠️ Pag " + str(page) + ": sin articulos"
+            )
             continue
 
-        page_deals, should_stop, skipped = extract_deals_from_articles(
-            articles, FECHA_INICIO, FECHA_FIN
+        page_deals, should_stop, skipped = (
+            extract_deals_from_articles(
+                articles, FECHA_INICIO, FECHA_FIN
+            )
         )
         deals.extend(page_deals)
 
-        msg = f"✅ Pág {page}: {len(page_deals)} chollos"
+        msg = (
+            "✅ Pag " + str(page) + ": "
+            + str(len(page_deals)) + " chollos"
+        )
         if skipped:
-            msg += f" | ⏭️ {skipped} saltados"
+            msg = msg + " | ⏭️ " + str(skipped) + " saltados"
         if should_stop:
-            msg += " | 🛑 Límite fecha"
+            msg = msg + " | 🛑 Limite fecha"
         log_container.write(msg)
 
         if should_stop:
@@ -416,33 +547,24 @@ if iniciar:
 
     log_container.write("=" * 50)
     log_container.write(
-        f"📊 **Resultado: {len(deals)} chollos encontrados**"
+        "📊 **Resultado: " + str(len(deals)) + " chollos**"
     )
-    log_container.write(
-        f"📐 Páginas escaneadas: {start_page} → {end_page} "
-        f"({total_pages} págs)"
-    )
-    if start_page > 1:
-        log_container.write(
-            f"⚡ Páginas saltadas al inicio: {start_page - 1}"
-        )
-    log_container.write("=" * 50)
 
-    # Guardar en session_state
     if deals:
         st.session_state['df'] = pd.DataFrame(deals)
-        st.session_state['fecha_inicio_str'] = FECHA_INICIO.strftime(
-            '%d/%m/%Y'
+        st.session_state['fecha_inicio_str'] = (
+            FECHA_INICIO.strftime('%d/%m/%Y')
         )
-        st.session_state['fecha_fin_str'] = FECHA_FIN.strftime(
-            '%d/%m/%Y'
+        st.session_state['fecha_fin_str'] = (
+            FECHA_FIN.strftime('%d/%m/%Y')
         )
         st.session_state['merchant_id'] = MERCHANT_ID
+        st.session_state['search_query'] = SEARCH_QUERY
         st.session_state['start_page'] = start_page
         st.session_state['end_page'] = end_page
     else:
         st.warning(
-            "⚠️ No se encontraron chollos en ese rango de fechas."
+            "⚠️ No se encontraron chollos en ese rango."
         )
 
 
@@ -452,20 +574,30 @@ if 'df' in st.session_state and not st.session_state['df'].empty:
     f_inicio = st.session_state.get('fecha_inicio_str', '')
     f_fin = st.session_state.get('fecha_fin_str', '')
     m_id = st.session_state.get('merchant_id', '')
+    s_query = st.session_state.get('search_query', '')
     s_page = st.session_state.get('start_page', 1)
     e_page = st.session_state.get('end_page', 1)
 
-    st.header(f"🎯 {len(df)} chollos encontrados")
+    if s_query:
+        search_label = "Busqueda: " + s_query
+        if m_id:
+            search_label = (
+                search_label + " | Retailer: " + str(m_id)
+            )
+    else:
+        search_label = "Merchant: " + str(m_id)
+
+    st.header("🎯 " + str(len(df)) + " chollos encontrados")
     st.caption(
-        f"Del {f_inicio} al {f_fin} | "
-        f"Merchant: {m_id} | "
-        f"Páginas {s_page} → {e_page}"
+        "Del " + f_inicio + " al " + f_fin + " | "
+        + search_label + " | "
+        + "Pags " + str(s_page) + " -> " + str(e_page)
     )
 
-    # --- FILTROS PRIMERO ---
+    # --- FILTROS ---
     st.header("🔎 Filtros")
 
-    col_f1, col_f2, col_f3 = st.columns(3)
+    col_f1, col_f2, col_f3, col_f4 = st.columns(4)
     with col_f1:
         marca_filter = st.multiselect(
             "Filtrar por marca",
@@ -473,13 +605,18 @@ if 'df' in st.session_state and not st.session_state['df'].empty:
         )
     with col_f2:
         cat_filter = st.multiselect(
-            "Filtrar por categoría",
-            sorted(df['Categoría'].unique())
+            "Filtrar por categoria",
+            sorted(df['Categoria'].unique())
         )
     with col_f3:
         estado_filter = st.multiselect(
             "Filtrar por estado",
             sorted(df['Estado'].unique())
+        )
+    with col_f4:
+        retailer_filter = st.multiselect(
+            "Filtrar por retailer",
+            sorted(df['Retailer'].unique())
         )
 
     df_filtered = df.copy()
@@ -489,33 +626,40 @@ if 'df' in st.session_state and not st.session_state['df'].empty:
         ]
     if cat_filter:
         df_filtered = df_filtered[
-            df_filtered['Categoría'].isin(cat_filter)
+            df_filtered['Categoria'].isin(cat_filter)
         ]
     if estado_filter:
         df_filtered = df_filtered[
             df_filtered['Estado'].isin(estado_filter)
         ]
+    if retailer_filter:
+        df_filtered = df_filtered[
+            df_filtered['Retailer'].isin(retailer_filter)
+        ]
 
-    # --- MÉTRICAS (ahora usan df_filtered) ---
-    any_filter = marca_filter or cat_filter or estado_filter
+    any_filter = (
+        marca_filter or cat_filter
+        or estado_filter or retailer_filter
+    )
     if any_filter:
         st.caption(
-            f"📌 Mostrando {len(df_filtered)} de "
-            f"{len(df)} chollos"
+            "📌 Mostrando " + str(len(df_filtered))
+            + " de " + str(len(df)) + " chollos"
         )
 
+    # --- METRICAS ---
     col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric(
         "🔥 Grados medio",
-        f"{df_filtered['Grados (°)'].mean():.1f}°"
+        str(round(df_filtered['Grados'].mean(), 1)) + "°"
     )
     col2.metric(
-        "🏆 Grados máximo",
-        f"{df_filtered['Grados (°)'].max()}°"
+        "🏆 Grados maximo",
+        str(df_filtered['Grados'].max()) + "°"
     )
     col3.metric(
         "💬 Comentarios",
-        f"{df_filtered['Comentarios'].sum():,}"
+        str(df_filtered['Comentarios'].sum())
     )
     col4.metric(
         "✅ Activos",
@@ -526,14 +670,17 @@ if 'df' in st.session_state and not st.session_state['df'].empty:
         len(df_filtered[df_filtered['Estado'] == 'Expirado'])
     )
 
-    # --- GRÁFICOS (también usan df_filtered) ---
-    st.header("📊 Análisis")
-    tab1, tab2, tab3 = st.tabs(
-        ["🏷️ Marcas", "📅 Evolución", "📂 Categorías"]
+    # --- GRAFICOS ---
+    st.header("📊 Analisis")
+    tab1, tab2, tab3, tab4 = st.tabs(
+        ["🏷️ Marcas", "📅 Evolucion",
+         "📂 Categorias", "🏪 Retailers"]
     )
 
     with tab1:
-        marca_counts = df_filtered['Marca'].value_counts().head(20)
+        marca_counts = (
+            df_filtered['Marca'].value_counts().head(20)
+        )
         st.bar_chart(marca_counts)
 
     with tab2:
@@ -548,8 +695,16 @@ if 'df' in st.session_state and not st.session_state['df'].empty:
         st.line_chart(evolucion)
 
     with tab3:
-        cat_counts = df_filtered['Categoría'].value_counts().head(15)
+        cat_counts = (
+            df_filtered['Categoria'].value_counts().head(15)
+        )
         st.bar_chart(cat_counts)
+
+    with tab4:
+        retailer_counts = (
+            df_filtered['Retailer'].value_counts().head(15)
+        )
+        st.bar_chart(retailer_counts)
 
     # --- TABLA ---
     st.header("📋 Todos los chollos")
@@ -558,7 +713,7 @@ if 'df' in st.session_state and not st.session_state['df'].empty:
         use_container_width=True,
         column_config={
             "URL": st.column_config.LinkColumn("URL"),
-            "Grados (°)": st.column_config.NumberColumn(
+            "Grados": st.column_config.NumberColumn(
                 format="%.1f°"
             ),
         }
@@ -569,11 +724,19 @@ if 'df' in st.session_state and not st.session_state['df'].empty:
 
     safe_inicio = f_inicio.replace('/', '')
     safe_fin = f_fin.replace('/', '')
-    base_filename = (
-        "chollos_" + str(m_id)
-        + "_" + safe_inicio
-        + "_a_" + safe_fin
-    )
+    if s_query:
+        safe_query = s_query.replace(' ', '_')
+        base_filename = (
+            "chollos_" + safe_query
+            + "_" + safe_inicio
+            + "_a_" + safe_fin
+        )
+    else:
+        base_filename = (
+            "chollos_" + str(m_id)
+            + "_" + safe_inicio
+            + "_a_" + safe_fin
+        )
 
     col_dl1, col_dl2 = st.columns(2)
 
@@ -608,13 +771,14 @@ if 'df' in st.session_state and not st.session_state['df'].empty:
 elif 'df' not in st.session_state:
     st.markdown(
         """
-        ### 👋 ¡Bienvenido!
+        ### 👋 Bienvenido!
 
-        **Cómo usar:**
-        1. 🏪 Elige el merchant en el sidebar izquierdo
-        2. 📅 Selecciona las fechas de inicio y fin
-        3. 🚀 Pulsa **Iniciar Scraping**
-        4. 📥 Descarga los resultados en Excel o CSV
+        **Como usar:**
+        1. 🔎 Elige modo: **Por Merchant** o **Por Keyword/Marca**
+        2. 🏪 Opcionalmente filtra por retailer
+        3. 📅 Selecciona fechas
+        4. 🚀 Pulsa **Iniciar Scraping**
+        5. 📥 Descarga en Excel o CSV
 
         **Merchants populares:**
         | Merchant | ID |
@@ -622,6 +786,17 @@ elif 'df' not in st.session_state:
         | MediaMarkt | 171 |
         | Amazon | 11 |
         | PcComponentes | 389 |
-        | El Corte Inglés | 456 |
+        | El Corte Ingles | 456 |
+        | Carrefour | 2 |
+        | Fnac | 12540 |
+
+        **Busquedas de ejemplo:**
+        | Keyword | Que busca |
+        |---|---|
+        | LG | Todos los chollos de LG |
+        | iPhone | Ofertas de iPhone |
+        | PS5 | Chollos de PlayStation 5 |
+        | portatil | Ofertas de portatiles |
+        | LG + MediaMarkt | Chollos LG solo en MediaMarkt |
         """
     )
