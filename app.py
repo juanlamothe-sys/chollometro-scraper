@@ -15,8 +15,8 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🔥 Chollometro Scraper")
-st.markdown("Extrae y analiza chollos de cualquier merchant en Chollometro")
+st.title("🔥 Chollometro Dashboard")
+st.markdown("Extrae y analiza chollos de cualquier vendedor en Chollometro")
 
 # --- MERCHANTS PREDEFINIDOS ---
 MERCHANTS = {
@@ -30,9 +30,9 @@ MERCHANTS = {
 
 # --- SIDEBAR ---
 with st.sidebar:
-    st.header("⚙️ Configuración")
+    st.header("⚙️ Configura tu report")
 
-    merchant_sel = st.selectbox("🏪 Merchant", options=list(MERCHANTS.keys()))
+    merchant_sel = st.selectbox("🏪 Retailer", options=list(MERCHANTS.keys()))
     if MERCHANTS[merchant_sel] == 0:
         MERCHANT_ID = st.number_input("ID manual", min_value=1, value=171)
     else:
@@ -61,7 +61,7 @@ with st.sidebar:
     FECHA_FIN = datetime.combine(fecha_fin, datetime.max.time())
 
     iniciar = st.button(
-        "🚀 Iniciar Scraping",
+        "🚀 Iniciar Búsqueda",
         type="primary",
         use_container_width=True
     )
@@ -595,13 +595,13 @@ elif 'df' not in st.session_state:
         ### 👋 ¡Bienvenido!
 
         **Cómo usar:**
-        1. 🏪 Elige el merchant en el sidebar izquierdo
+        1. 🏪 Elige el retailer en el selector a la izquierda
         2. 📅 Selecciona las fechas de inicio y fin
-        3. 🚀 Pulsa **Iniciar Scraping**
+        3. 🚀 Pulsa **Iniciar Búsqueda**
         4. 📥 Descarga los resultados en Excel o CSV
 
-        **Merchants populares:**
-        | Merchant | ID |
+        **Retailer populares:**
+        | Retailer | ID |
         |---|---|
         | MediaMarkt | 171 |
         | Amazon | 11 |
