@@ -24,7 +24,6 @@ MERCHANTS = {
     "Amazon (11)": 11,
     "PcComponentes (389)": 389,
     "El Corte Inglés (456)": 456,
-    "LG (1857)": 1857,
     "Otro (manual)": 0,
 }
 
@@ -117,119 +116,225 @@ def detectar_marca(titulo):
     return mejor_marca
 
 
+def fetch_page(page_num):
+    """Descarga una página y devuelve la soup + artículos. None si falla."""
+    url = f"https://www.chollometro.com/search/ofertas?merchant-id={MERCHANT_ID}&page={page_num}"
+    try:
+        response = requests.get(url, headers=HEADERS, timeout=15)
+        if response.status_code != 200:
+            return None, []
+    except:
+        return None, []
+
+    soup = BeautifulSoup(response.text, 'html.parser')
+    articles = soup.find_all('article', class_=lambda c: c and 'thread' in c)
+    return soup, articles
+
+
+def get_page_first_date(page_num):
+    """Obtiene la fecha del primer chollo de una página (la más reciente)."""
+    _, articles = fetch_page(page_num)
+    for article in articles:
+        vue_div = article.find('div', attrs={'data-vue3': True})
+        if not vue_div:
+            continue
+        try:
+            vue_data = json.loads(vue_div['data-vue3'])
+            thread = vue_data.get('props', {}).get('thread', {})
+            pub_timestamp = thread.get('publishedAt', 0)
+            if pub_timestamp:
+                return datetime.utcfromtimestamp(int(pub_timestamp))
+        except:
+            continue
+    return None
+
+
+def find_start_page(fecha_fin, log):
+    """
+    Salto exponencial + búsqueda binaria para encontrar la página
+    donde empiezan los chollos dentro del rango de fechas.
+    """
+    log.write("🔍 **Fase 1: Buscando página de inicio (salto exponencial)...**")
+
+    # --- Paso 1: Salto exponencial (1, 2, 4, 8, 16, 32...) ---
+    prev_page = 1
+    page = 1
+    while True:
+        first_date = get_page_first_date(page)
+        time.sleep(0.5)
+
+        if first_date is None:
+            log.write(f"   Pág {page}: sin datos → fin del merchant")
+            return max(1, prev_page)
+
+        log.write(f"   Pág {page}: primer chollo del {first_date.strftime('%d/%m/%Y')}")
+
+        if first_date <= fecha_fin:
+            break  # Esta página ya tiene chollos dentro del rango
+
+        prev_page = page
+        page *= 2  # Salto exponencial
+
+    # --- Paso 2: Búsqueda binaria entre prev_page y page ---
+    lo = prev_page
+    hi = page
+    log.write(f"🔍 **Fase 2: Búsqueda binaria entre pág {lo} y {hi}...**")
+
+    while lo < hi:
+        mid = (lo + hi) // 2
+        first_date = get_page_first_date(mid)
+        time.sleep(0.5)
+
+        if first_date is None or first_date <= fecha_fin:
+            hi = mid
+            log.write(f"   Pág {mid}: {first_date.strftime('%d/%m/%Y') if first_date else 'sin datos'} → buscando antes")
+        else:
+            lo = mid + 1
+            log.write(f"   Pág {mid}: {first_date.strftime('%d/%m/%Y')} → aún muy reciente")
+
+    # Retrocedemos 1 página por seguridad (puede haber fechas mezcladas)
+    start = max(1, lo - 1)
+    log.write(f"✅ **Empezando recolección desde página {start}**")
+    return start
+
+
+def extract_deals_from_articles(articles, fecha_inicio, fecha_fin):
+    """Extrae los chollos de los artículos de una página dentro del rango."""
+    page_deals = []
+    stop = False
+    skipped = 0
+
+    for article in articles:
+        vue_div = article.find('div', attrs={'data-vue3': True})
+        if not vue_div:
+            continue
+        try:
+            vue_data = json.loads(vue_div['data-vue3'])
+            thread = vue_data.get('props', {}).get('thread', {})
+        except (json.JSONDecodeError, KeyError):
+            continue
+
+        title = thread.get('title', 'Sin título')
+        brand = detectar_marca(title)
+        degrees = thread.get('temperature', 0)
+        try:
+            degrees = round(float(degrees), 1)
+        except:
+            degrees = 0
+        comments = thread.get('commentCount', 0)
+
+        pub_timestamp = thread.get('publishedAt', 0)
+        pub_date = None
+        if pub_timestamp:
+            try:
+                pub_date = datetime.utcfromtimestamp(int(pub_timestamp))
+            except:
+                pass
+
+        # Más reciente que FECHA_FIN → saltar
+        if pub_date and pub_date > fecha_fin:
+            skipped += 1
+            continue
+
+        # Más antiguo que FECHA_INICIO → parar
+        if pub_date and pub_date < fecha_inicio:
+            stop = True
+            break
+
+        # Dentro del rango → recoger
+        link = thread.get('shareableLink', '')
+        if not link:
+            slug = thread.get('titleSlug', '')
+            thread_id = thread.get('threadId', '')
+            link = f"https://www.chollometro.com/ofertas/{slug}-{thread_id}" if slug else ''
+
+        author = thread.get('user', {}).get('username', '')
+        status = thread.get('status', '')
+        is_expired = thread.get('isExpired', False)
+        price = thread.get('price', '')
+        next_best_price = thread.get('nextBestPrice', '')
+        category = thread.get('mainGroup', {}).get('threadGroupName', '')
+
+        page_deals.append({
+            'Título': title,
+            'Marca': brand,
+            'Fecha': pub_date.strftime('%Y-%m-%d %H:%M') if pub_date else 'N/A',
+            'Autor': author,
+            'Grados (°)': degrees,
+            'Comentarios': comments,
+            'Precio (€)': price,
+            'Precio ref. (€)': next_best_price,
+            'Categoría': category,
+            'Estado': 'Expirado' if is_expired else status,
+            'URL': link,
+        })
+
+    return page_deals, stop, skipped
+
+
 # --- SCRAPING (solo cuando se pulsa el botón) ---
 if iniciar:
     deals = []
-    stop_scraping = False
-    skipped_newer = 0
-    page = 0
+    total_skipped = 0
 
-    progress_bar = st.progress(0, text="Iniciando scraping...")
+    progress_bar = st.progress(0, text="Iniciando...")
     status_text = st.empty()
-    log_container = st.expander("📋 Log de ejecución", expanded=False)
+    log_container = st.expander("📋 Log de ejecución", expanded=True)
+
+    # --- FASE 1+2: Encontrar página de inicio con salto exponencial + binaria ---
+    status_text.info("🔍 Buscando la página correcta para tu rango de fechas...")
+    start_page = find_start_page(FECHA_FIN, log_container)
+
+    # --- FASE 3: Recolección página a página desde start_page ---
+    log_container.write(f"📥 **Fase 3: Recolectando chollos desde página {start_page}...**")
+    status_text.info(f"📥 Recolectando chollos desde página {start_page}...")
+
+    page = start_page
+    stop_scraping = False
 
     while not stop_scraping:
-        page += 1
-        url = f"https://www.chollometro.com/search/ofertas?merchant-id={MERCHANT_ID}&page={page}"
+        progress_bar.progress(min(95, 30 + (page - start_page) * 3), text=f"Página {page}...")
         status_text.info(f"📄 Página {page}... ({len(deals)} chollos recogidos)")
-        progress_bar.progress(min(page * 2, 99), text=f"Escaneando página {page}...")
 
-        try:
-            response = requests.get(url, headers=HEADERS, timeout=15)
-            if response.status_code != 200:
-                log_container.write(f"❌ HTTP {response.status_code} en página {page}. Parando.")
-                break
-        except Exception as e:
-            log_container.write(f"❌ Error en página {page}: {e}")
-            break
-
-        soup = BeautifulSoup(response.text, 'html.parser')
-        articles = soup.find_all('article', class_=lambda c: c and 'thread' in c)
+        _, articles = fetch_page(page)
 
         if not articles:
             log_container.write(f"⚠️ Sin artículos en página {page}. Fin.")
             break
 
-        count = 0
-        for article in articles:
-            vue_div = article.find('div', attrs={'data-vue3': True})
-            if not vue_div:
-                continue
-            try:
-                vue_data = json.loads(vue_div['data-vue3'])
-                thread = vue_data.get('props', {}).get('thread', {})
-            except (json.JSONDecodeError, KeyError):
-                continue
+        page_deals, stop_scraping, skipped = extract_deals_from_articles(
+            articles, FECHA_INICIO, FECHA_FIN
+        )
+        deals.extend(page_deals)
+        total_skipped += skipped
 
-            title = thread.get('title', 'Sin título')
-            brand = detectar_marca(title)
-            degrees = thread.get('temperature', 0)
-            try:
-                degrees = round(float(degrees), 1)
-            except:
-                degrees = 0
-            comments = thread.get('commentCount', 0)
+        log_container.write(
+            f"✅ Pág {page}: {len(page_deals)} chollos"
+            + (f" | ⏭️ {skipped} saltados" if skipped else "")
+            + (" | 🛑 Límite fecha alcanzado" if stop_scraping else "")
+        )
 
-            pub_timestamp = thread.get('publishedAt', 0)
-            pub_date = None
-            if pub_timestamp:
-                try:
-                    pub_date = datetime.utcfromtimestamp(int(pub_timestamp))
-                except:
-                    pass
+        if stop_scraping:
+            break
 
-            if pub_date and pub_date > FECHA_FIN:
-                skipped_newer += 1
-                continue
-
-            if pub_date and pub_date < FECHA_INICIO:
-                log_container.write(
-                    f"🛑 Chollo del {pub_date.strftime('%d/%m/%Y')} → "
-                    f"anterior a {FECHA_INICIO.strftime('%d/%m/%Y')}. Parando."
-                )
-                stop_scraping = True
-                break
-
-            link = thread.get('shareableLink', '')
-            if not link:
-                slug = thread.get('titleSlug', '')
-                thread_id = thread.get('threadId', '')
-                link = f"https://www.chollometro.com/ofertas/{slug}-{thread_id}" if slug else ''
-
-            author = thread.get('user', {}).get('username', '')
-            status = thread.get('status', '')
-            is_expired = thread.get('isExpired', False)
-            price = thread.get('price', '')
-            next_best_price = thread.get('nextBestPrice', '')
-            category = thread.get('mainGroup', {}).get('threadGroupName', '')
-
-            deals.append({
-                'Título': title,
-                'Marca': brand,
-                'Fecha': pub_date.strftime('%Y-%m-%d %H:%M') if pub_date else 'N/A',
-                'Autor': author,
-                'Grados (°)': degrees,
-                'Comentarios': comments,
-                'Precio (€)': price,
-                'Precio ref. (€)': next_best_price,
-                'Categoría': category,
-                'Estado': 'Expirado' if is_expired else status,
-                'URL': link,
-            })
-            count += 1
-
-        log_container.write(f"✅ Página {page}: {count} chollos recogidos")
+        page += 1
         time.sleep(1.5)
 
     progress_bar.progress(100, text="✅ Scraping completado!")
     status_text.empty()
 
-    # Guardar en session_state para que sobreviva a los re-renders
+    pages_searched = page - start_page + 1
+    log_container.write(f"\n📊 **Resumen: {len(deals)} chollos en {pages_searched} páginas escaneadas**")
+    if start_page > 1:
+        log_container.write(f"⚡ **Optimización: se saltaron {start_page - 1} páginas gracias a la búsqueda binaria**")
+
+    # Guardar en session_state
     if deals:
         st.session_state['df'] = pd.DataFrame(deals)
         st.session_state['fecha_inicio_str'] = FECHA_INICIO.strftime('%d/%m/%Y')
         st.session_state['fecha_fin_str'] = FECHA_FIN.strftime('%d/%m/%Y')
         st.session_state['merchant_id'] = MERCHANT_ID
+        st.session_state['pages_skipped'] = start_page - 1
     else:
         st.warning("⚠️ No se encontraron chollos en ese rango de fechas.")
 
@@ -240,9 +345,13 @@ if 'df' in st.session_state and not st.session_state['df'].empty:
     f_inicio = st.session_state.get('fecha_inicio_str', '')
     f_fin = st.session_state.get('fecha_fin_str', '')
     m_id = st.session_state.get('merchant_id', '')
+    pages_skipped = st.session_state.get('pages_skipped', 0)
 
     st.header(f"🎯 {len(df)} chollos encontrados")
-    st.caption(f"Del {f_inicio} al {f_fin} | Merchant ID: {m_id}")
+    st.caption(
+        f"Del {f_inicio} al {f_fin} | Merchant ID: {m_id}"
+        + (f" | ⚡ {pages_skipped} páginas saltadas con búsqueda binaria" if pages_skipped > 0 else "")
+    )
 
     # --- MÉTRICAS ---
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -341,5 +450,4 @@ elif 'df' not in st.session_state:
     | Amazon | 11 |
     | PcComponentes | 389 |
     | El Corte Inglés | 456 |
-    | LG | 1857 |
     """)
