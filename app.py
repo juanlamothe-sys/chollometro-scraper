@@ -24,6 +24,7 @@ MERCHANTS = {
     "Amazon (11)": 11,
     "PcComponentes (389)": 389,
     "El Corte Inglés (456)": 456,
+    "LG" (1857)": 1857,
     "Otro (manual)": 0,
 }
 
@@ -606,5 +607,6 @@ elif 'df' not in st.session_state:
         | Amazon | 11 |
         | PcComponentes | 389 |
         | El Corte Inglés | 456 |
+        | LG | 1857 |
         """
     )
