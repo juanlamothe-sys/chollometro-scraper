@@ -25,24 +25,19 @@ st.markdown(
 MERCHANTS = {
     "Todos (sin filtro)": 0,
     "MediaMarkt (171)": 171,
-    "Amazon (11)": 11,
-    "PcComponentes (389)": 389,
-    "El Corte Ingles (456)": 456,
-    "Carrefour (2)": 2,
-    "Lidl (4457)": 4457,
-    "Alcampo (7457)": 7457,
-    "Decathlon (7723)": 7723,
-    "Leroy Merlin (7775)": 7775,
-    "Ikea (7897)": 7897,
-    "Fnac (12540)": 12540,
-    "Worten (13267)": 13267,
-    "AliExpress (10671)": 10671,
-    "Miravia (52498)": 52498,
-    "Temu (57498)": 57498,
-    "LG (23498)": 23498,
-    "Samsung (23694)": 23694,
-    "Apple (23252)": 23252,
-    "Xiaomi (23658)": 23658,
+    "Amazon (173)": 173,
+    "PcComponentes (202)": 202,
+    "El Corte Ingles (170)": 170,
+    "Carrefour (211)": 211,
+    "Fnac (192)": 192,
+    "Worten (205)": 205,
+    "AliExpress (165)": 165,
+    "Miravia (7530)": 7530,
+    "Temu (7537)": 7537,
+    "LG (1857)": 1857,
+    "Samsung (256)": 256,
+    "Apple (342)": 342,
+    "Xiaomi (259)": 259,
     "Otro (manual)": -1,
 }
 
@@ -781,14 +776,14 @@ elif 'df' not in st.session_state:
         5. 📥 Descarga en Excel o CSV
 
         **Merchants populares:**
-        | Merchant | ID |
+        | Merchant |
         |---|---|
-        | MediaMarkt | 171 |
-        | Amazon | 11 |
-        | PcComponentes | 389 |
-        | El Corte Ingles | 456 |
-        | Carrefour | 2 |
-        | Fnac | 12540 |
+        | MediaMarkt |
+        | Amazon | 
+        | PcComponentes |
+        | El Corte Ingles |
+        | Carrefour |
+        | Fnac | 
 
         **Busquedas de ejemplo:**
         | Keyword | Que busca |
