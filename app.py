@@ -143,7 +143,7 @@ MARCAS = [
     'Karcher', 'Kärcher', 'Weber', 'WMF', 'Zwilling',
     'KitchenAid', 'Nespresso', "De'Longhi", 'DeLonghi', 'Krups',
     'Tassimo', 'SanDisk', 'Western Digital', 'WD', 'Seagate',
-    'Kingston', 'Crucial', 'Intel', 'AMD', 'Nvidia', 'NanoCell',
+    'Kingston', 'Crucial', 'Intel', 'AMD', 'Nvidia',
     'Beats', 'Nothing', 'Motorola', 'Honor', 'Amazfit', 'Polar',
     'Suunto', 'Lego', 'Playmobil', 'Barbie', 'Hot Wheels',
     'Cricut', 'Brother', 'Epson', 'Roidmi', 'Tineco', 'Creality',
